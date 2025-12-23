@@ -1,0 +1,38 @@
+<!-- PRODUCT MODAL -->
+<div x-cloak x-show="productModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm" @click.self="productModalOpen = false">
+    <!-- ... съдържанието е същото, само Z-Index е важен ... -->
+    <div class="bg-white rounded-xl shadow-2xl w-[900px] max-w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
+        <!-- ... копирайте стария контент ... -->
+        <div class="bg-gray-50 p-4 border-b flex justify-between"><h3 class="text-xl font-bold">Details</h3><button @click="productModalOpen = false">&times;</button></div>
+        <div class="p-8 flex-grow overflow-auto">
+            <h2 x-text="selectedProduct?.name" class="text-2xl font-bold mb-4"></h2>
+            <div class="text-3xl font-bold text-blue-600 mb-4" x-text="formatPrice(selectedProduct?.price)"></div>
+            <button @click="addToCart(selectedProduct); productModalOpen = false" class="bg-blue-600 text-white w-full py-3 font-bold rounded">Add to Cart</button>
+        </div>
+    </div>
+</div>
+
+<!-- CUSTOMER SEARCH MODAL -->
+<div x-cloak x-show="customerModalOpen" class="fixed inset-0 z-[110] flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm" @click.self="customerModalOpen = false">
+    <div class="bg-white rounded-xl shadow-2xl w-[800px] max-w-[95vw] max-h-[85vh] flex flex-col">
+        <div class="p-5 border-b bg-gray-50 rounded-t-xl flex justify-between">
+            <h3 class="text-xl font-bold">Find Customer</h3>
+            <button @click="customerModalOpen = false" class="text-2xl">&times;</button>
+        </div>
+        <div class="p-4 bg-white border-b">
+            <input type="text" x-model="customerSearchQuery" @input.debounce.300ms="searchCustomers()" x-ref="customerSearchInput" placeholder="Search..." class="w-full border-2 border-indigo-100 p-3 rounded text-lg focus:border-indigo-500">
+        </div>
+        <div class="flex-grow overflow-y-auto p-4 bg-gray-50">
+            <template x-for="c in customerResults" :key="c.id">
+                <div @click="selectCustomer(c)" class="bg-white border p-4 rounded mb-2 hover:border-indigo-500 cursor-pointer flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-lg" x-text="c.firstname + ' ' + c.lastname"></div>
+                        <div class="text-sm text-gray-500" x-text="c.email"></div>
+                    </div>
+                    <button class="bg-indigo-50 text-indigo-700 px-3 py-1 rounded text-sm font-bold">Select</button>
+                </div>
+            </template>
+            <div x-show="customerResults.length === 0" class="text-center py-10 text-gray-400">No results</div>
+        </div>
+    </div>
+</div>

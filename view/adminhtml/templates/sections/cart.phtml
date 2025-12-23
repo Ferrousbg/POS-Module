@@ -1,0 +1,47 @@
+<div class="h-full flex flex-col p-6">
+    <h2 class="text-2xl font-extrabold mb-4 text-gray-800 border-b pb-4 flex justify-between">
+        <span>🛒 Cart</span>
+        <span class="text-blue-600" x-text="cart.length + ' items'"></span>
+    </h2>
+
+    <!-- Cart Items -->
+    <div class="flex-1 overflow-y-auto pr-2">
+        <template x-for="(item, index) in cart" :key="index">
+            <div class="flex justify-between items-center border-b border-gray-100 py-4 group">
+                <div class="w-1/2">
+                    <div class="text-lg font-bold text-gray-900 leading-tight mb-1" x-text="item.name"></div>
+                    <div class="text-sm text-gray-500 font-mono" x-text="item.sku"></div>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center border-2 border-gray-300 rounded-lg overflow-hidden bg-white">
+                        <button @click="item.qty > 1 ? (item.qty--, calculateTotal()) : removeFromCart(index)" class="px-3 py-1 hover:bg-gray-100 text-xl font-bold text-gray-600">-</button>
+                        <input type="number" x-model="item.qty" @change="calculateTotal()" class="w-12 text-center border-0 p-0 text-xl font-bold text-gray-800">
+                        <button @click="item.qty++; calculateTotal()" class="px-3 py-1 hover:bg-gray-100 text-xl font-bold text-gray-600">+</button>
+                    </div>
+                    <div class="text-right w-24 font-bold text-gray-800 text-xl" x-text="formatPrice(item.price * item.qty)"></div>
+                </div>
+            </div>
+        </template>
+        <div x-show="cart.length === 0" class="text-center text-gray-400 py-20 text-xl">Empty Cart</div>
+    </div>
+
+    <!-- Totals & Actions -->
+    <div class="mt-4 pt-6 border-t-2 border-gray-200">
+        <div class="flex justify-between items-end mb-6">
+            <span class="text-xl font-bold text-gray-500">Total Amount:</span>
+            <span class="text-4xl font-extrabold text-gray-900" x-text="formatPrice(grandTotal)"></span>
+        </div>
+
+        <button @click="placeOrder()"
+                :disabled="!isValidOrder"
+                :class="{'opacity-50 cursor-not-allowed bg-gray-400': !isValidOrder, 'bg-green-600 hover:bg-green-700 shadow-xl transform active:scale-[0.98]': isValidOrder}"
+                class="w-full text-white font-extrabold py-6 rounded-xl transition text-2xl flex justify-center items-center gap-3 uppercase tracking-wide">
+            <span x-show="!placingOrder">🚀 Complete Order</span>
+            <span x-show="placingOrder">Processing...</span>
+        </button>
+        <div x-show="!isValidOrder" class="text-center text-red-500 mt-3 font-bold text-sm uppercase">
+            * Add Customer & Products to continue
+        </div>
+    </div>
+</div>

@@ -1,0 +1,304 @@
+<?php
+/** @var \Magento\Backend\Block\Template $block */
+
+// 1. Инициализация
+$objectManager = \Magento\Framework\App\ObjectManager::getInstance();
+$storeManager = $objectManager->get('\Magento\Store\Model\StoreManagerInterface');
+$authSession = $objectManager->get('\Magento\Backend\Model\Auth\Session');
+$shippingConfig = $objectManager->get('\Magento\Shipping\Model\Config');
+$scopeConfig = $objectManager->get('\Magento\Framework\App\Config\ScopeConfigInterface');
+
+$currentUser = $authSession->getUser();
+$currentUsername = $currentUser ? $currentUser->getUserName() : '';
+
+// 2. Ограничения (ACL)
+$restrictedAdmins = [
+    'cashier_ferrous' => 1,
+    'cashier_sofia'   => 2,
+];
+$forcedStoreId = isset($restrictedAdmins[$currentUsername]) ? $restrictedAdmins[$currentUsername] : null;
+
+// 3. Зареждане на Магазини
+$websites = $storeManager->getWebsites();
+$storesData = [];
+$storesIds = [];
+
+foreach ($websites as $website) {
+    foreach ($website->getGroups() as $group) {
+        $stores = $group->getStores();
+        foreach ($stores as $store) {
+            $sid = (int)$store->getId();
+            if ($forcedStoreId && $sid !== $forcedStoreId) continue;
+
+            $storesData[] = [
+                'id' => $sid,
+                'code' => $store->getCode(),
+                'name' => $store->getName(),
+                'website' => $website->getName(),
+                'group' => $group->getName(),
+                'is_active' => $store->getIsActive()
+            ];
+            $storesIds[] = $sid;
+        }
+    }
+}
+$defaultStoreId = $forcedStoreId ? $forcedStoreId : $storeManager->getStore()->getId();
+
+// 4. НАСИЛСТВЕНО ВЗИМАНЕ НА МЕТОДИ
+$shippingMethodsPerStore = [];
+$allCarriers = $shippingConfig->getAllCarriers();
+
+foreach ($storesIds as $sid) {
+    $methods = [];
+    foreach ($allCarriers as $carrierCode => $carrierModel) {
+
+        // Проверяваме дали е 'Active' в конфигурацията
+        $isActive = $scopeConfig->getValue(
+            'carriers/'.$carrierCode.'/active',
+            \Magento\Store\Model\ScopeInterface::SCOPE_STORE,
+            $sid
+        );
+
+        if ($isActive) {
+            // Взимаме заглавието от конфига
+            $carrierTitle = $scopeConfig->getValue(
+                'carriers/'.$carrierCode.'/title',
+                \Magento\Store\Model\ScopeInterface::SCOPE_STORE,
+                $sid
+            );
+            if (!$carrierTitle) $carrierTitle = ucfirst($carrierCode);
+
+            // Опитваме официалния начин
+            $allowedMethods = $carrierModel->getAllowedMethods();
+
+            if (!empty($allowedMethods)) {
+                foreach ($allowedMethods as $methodCode => $methodTitle) {
+                    $code = $carrierCode . '_' . $methodCode;
+                    $fullTitle = $carrierTitle . ' - ' . ($methodTitle ? $methodTitle : $methodCode);
+                    $methods[] = ['code' => $code, 'title' => $fullTitle];
+                }
+            } else {
+                // FALLBACK
+                if ($carrierCode == 'tablerate') {
+                    $methods[] = ['code' => 'tablerate_bestway', 'title' => $carrierTitle . ' - Best Way'];
+                }
+                else if ($carrierCode == 'flatrate') {
+                    $methods[] = ['code' => 'flatrate_flatrate', 'title' => $carrierTitle . ' - Fixed'];
+                }
+                else {
+                    $methods[] = ['code' => $carrierCode . '_' . $carrierCode, 'title' => $carrierTitle];
+                }
+            }
+        }
+    }
+    $shippingMethodsPerStore[$sid] = $methods;
+}
+// 7. Econt Integration (Anowave)
+// 6. ECONT INTEGRATION (ANOWAVE)
+$econtButtonHtml = '';
+try {
+    // Създаваме блока на Anowave
+    $econtBlock = $block->getLayout()->createBlock(\Anowave\Econt\Block\Adminhtml\Order\View\OrderEcontButton::class);
+
+    // Ако блокът е създаден успешно
+    if ($econtBlock) {
+        $econtBlock->setTemplate('Anowave_Econt::order/view/econt_button.phtml');
+        // Генерираме HTML
+        $econtButtonHtml = $econtBlock->toHtml();
+    }
+} catch (\Exception $e) {
+    // Логваме грешката, ако модулът липсва (само за тест)
+    // $econtButtonHtml = 'Error loading Econt: ' . $e->getMessage();
+    $econtButtonHtml = '';
+}
+
+// 5. CONFIG ARRAY
+$config = [
+    'searchUrl' => $block->getUrl('adminorder/order/search'),
+    'createUrl' => $block->getUrl('adminorder/order/create'),
+    'customerSearchUrl' => $block->getUrl('adminorder/customer/search'),
+    'shareUrl' => $block->getUrl('adminorder/order/share'),
+    'formKey' => $block->getFormKey(),
+    'stores' => $storesData,
+    'allShippingMethods' => $shippingMethodsPerStore,
+    'defaultStoreId' => $defaultStoreId,
+    'isStoreLocked' => ($forcedStoreId !== null),
+
+    // ВАЖНО: Добавяме HTML-а тук!
+    'econtButtonHtml' => $econtButtonHtml
+];
+?>
+
+<!-- --- 2. SCRIPTS & STYLES --- -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+    tailwind.config = { corePlugins: { preflight: false } }
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+<!-- ВАЖНО: Зареждаме външния JS файл с логиката -->
+<script src="<?= $block->getViewFileUrl('Ferrousbg_AdminOrder::js/pos-logic.js') ?>"></script>
+
+<style>
+    /* HIDE MAGENTO UI */
+    .page-main-actions, .page-title-wrapper, .page-header, .nav-bar, .page-footer { display: none !important; }
+    .admin__data-grid-wrap { padding: 0 !important; }
+    #maincontent, .page-content { padding: 0 !important; margin: 0 !important; }
+
+    /* LAYOUT & FONTS */
+    .ferrous-pos-wrapper {
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        position: relative;
+        height: calc(100vh - 60px);
+        width: 100%;
+        background-color: #f3f4f6;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        color: #1f2937;
+        font-size: 16px;
+    }
+
+    .ferrous-pos-wrapper *, .ferrous-pos-wrapper ::before, .ferrous-pos-wrapper ::after {
+        box-sizing: border-box; border-width: 0; border-style: solid; border-color: #e5e7eb;
+    }
+
+    /* RESTORE BORDERS & INPUTS */
+    .ferrous-pos-wrapper .border { border-width: 1px; }
+    .ferrous-pos-wrapper .border-2 { border-width: 2px; }
+    .ferrous-pos-wrapper .border-b { border-bottom-width: 1px; }
+    .ferrous-pos-wrapper .border-t { border-top-width: 1px; }
+    .ferrous-pos-wrapper .border-r { border-right-width: 1px; }
+    .ferrous-pos-wrapper .border-l { border-left-width: 1px; }
+
+    .ferrous-pos-wrapper input, .ferrous-pos-wrapper select, .ferrous-pos-wrapper textarea {
+        display: block; width: 100%; background-color: #fff; padding: 0.75rem 1rem; font-size: 1rem; line-height: 1.5;
+    }
+    .ferrous-pos-wrapper input:focus, .ferrous-pos-wrapper select:focus {
+        outline: 2px solid #3b82f6; border-color: #3b82f6;
+    }
+
+    .ferrous-pos-wrapper .shadow-md { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    .ferrous-pos-wrapper .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+    .ferrous-pos-wrapper .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
+    .ferrous-pos-wrapper .rounded-xl { border-radius: 0.75rem; }
+
+    [x-cloak] { display: none !important; }
+</style>
+
+<!-- --- 3. MAIN HTML STRUCTURE --- -->
+<div x-data="adminOrder(<?= $block->escapeHtmlAttr(json_encode($config)) ?>)" x-init="initPOS()" class="ferrous-pos-wrapper">
+
+    <!-- HEADER BAR -->
+    <div class="bg-gray-900 text-white px-8 py-4 flex justify-between items-center h-20 shrink-0 shadow-md z-20">
+        <div class="flex items-center gap-4">
+            <h1 class="text-3xl font-extrabold m-0 text-white flex items-center gap-2 tracking-tight">
+                <span class="text-blue-400">⚡</span> Flash POS
+            </h1>
+            <span class="bg-blue-600 text-xs font-bold px-2 py-1 rounded text-white uppercase tracking-wider">Pro</span>
+        </div>
+
+        <!-- CUSTOM STORE DROPDOWN (NO SELECT TAG) -->
+        <div class="flex items-center gap-3 bg-gray-800 p-1.5 rounded-lg border border-gray-700 shadow-inner relative"
+             x-data="{ open: false }">
+
+            <label class="text-gray-400 text-[10px] font-bold uppercase tracking-wider pl-2">POS:</label>
+
+            <!-- LOCKED MODE -->
+            <template x-if="urls.isStoreLocked || urls.stores.length === 1">
+                <div class="bg-gray-900 px-3 py-1.5 rounded text-sm font-bold border border-gray-600 text-gray-300 flex items-center gap-2 cursor-not-allowed opacity-75">
+                    <span>🔒</span>
+                    <span x-text="getStoreName(currentStoreId)"></span>
+                </div>
+            </template>
+
+            <!-- DROPDOWN MODE (NEW CLEAN STYLE) -->
+            <template x-if="!urls.isStoreLocked && urls.stores.length > 1">
+                <div class="relative">
+                    <!-- Trigger Button (Light Gray) -->
+                    <button @click="open = !open"
+                            @click.outside="open = false"
+                            class="flex items-center justify-between w-[280px] bg-gray-100 hover:bg-white text-gray-800 border border-gray-400 rounded px-3 py-1.5 text-sm font-bold focus:outline-none transition-all shadow-sm">
+
+                        <span x-text="getStoreName(currentStoreId)"></span>
+
+                        <svg class="w-4 h-4 text-gray-500 transition-transform duration-200" :class="{'rotate-180': open}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+
+                    <!-- Dropdown Menu (White Background, Dark Text) -->
+                    <div x-show="open"
+                         x-transition.opacity.duration.200ms
+                         class="absolute right-0 top-full mt-2 w-[300px] bg-white border border-gray-300 rounded-lg shadow-2xl z-50 overflow-hidden max-h-[400px] overflow-y-auto"
+                         style="display: none;">
+
+                        <template x-for="store in urls.stores" :key="store.id">
+                            <button @click="requestStoreSwitch(store.id); open = false"
+                                    class="w-full text-left px-4 py-3 text-sm font-bold transition-colors border-b border-gray-100 last:border-0 flex items-center gap-2 group"
+                                    :class="{
+                                        'bg-blue-50 text-blue-700': store.id == currentStoreId,
+                                        'text-gray-600 hover:bg-gray-100 hover:text-gray-900': store.id != currentStoreId
+                                    }">
+
+                                <!-- Indicator Dot -->
+                                <span class="w-2 h-2 rounded-full block"
+                                      :class="store.id == currentStoreId ? 'bg-blue-600' : 'bg-transparent group-hover:bg-gray-300'"></span>
+
+                                <span x-text="store.website + ' - ' + store.name"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- CONTENT AREA -->
+    <div class="flex flex-1 overflow-hidden relative">
+
+        <!-- LEFT: PRODUCTS -->
+        <div class="flex-1 flex flex-col h-full bg-gray-100 relative z-0 p-6 overflow-hidden">
+            <?= $block->getChildHtml('section.products') ?>
+        </div>
+
+        <!-- RIGHT: SIDEBAR -->
+        <div class="w-[480px] bg-white border-l border-gray-300 flex flex-col h-full shadow-2xl shrink-0 z-10 relative">
+            <div class="border-b border-gray-200 bg-gray-50 p-0">
+                <?= $block->getChildHtml('section.customer') ?>
+            </div>
+            <div class="flex-1 overflow-y-auto bg-white p-0">
+                <?= $block->getChildHtml('section.cart') ?>
+            </div>
+        </div>
+
+    </div>
+
+    <?= $block->getChildHtml('section.modals') ?>
+
+    <!-- === ВАЖНО: CUSTOM CONFIRM MODAL (ЗА KIOSK MODE) === -->
+    <div x-show="confirmModal.open"
+         style="display: none;"
+         class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[9999] backdrop-blur-sm"
+         x-transition.opacity>
+
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all scale-100 border border-gray-300 relative">
+
+            <div class="flex items-center gap-3 mb-4 text-orange-600 border-b border-gray-100 pb-3">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                <h3 class="text-xl font-extrabold text-gray-900" x-text="confirmModal.title">Warning</h3>
+            </div>
+
+            <p class="text-gray-600 font-medium mb-8 text-base leading-relaxed" x-text="confirmModal.message">Are you sure?</p>
+
+            <div class="flex gap-3 justify-end">
+                <!-- ВАЖНО: Използваме директно closeConfirm -->
+                <button @click="closeConfirm(false)" class="px-5 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200 transition focus:outline-none border border-gray-300">
+                    Cancel
+                </button>
+                <button @click="closeConfirm(true)" class="px-5 py-2.5 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 shadow-md hover:shadow-lg transition focus:outline-none">
+                    Yes, Switch
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

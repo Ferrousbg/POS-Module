@@ -1,0 +1,171 @@
+<?php
+/** @var \Magento\Backend\Block\Template $block */
+?>
+<div class="p-4 h-full flex flex-col">
+
+    <!-- HEADER: Title & Search -->
+    <div class="flex justify-between items-center mb-4 border-b border-gray-200 pb-2">
+        <h2 class="text-lg font-extrabold text-gray-800 flex items-center gap-2">
+            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+            Client Details
+        </h2>
+
+        <div class="flex gap-2">
+            <!-- Search Input -->
+            <div class="relative">
+                <input type="text"
+                       x-model="customerSearchQuery"
+                       @input.debounce.300ms="searchCustomers()"
+                       @keydown.escape="customerResults = []"
+                       placeholder="Search by Name, Email, Phone..."
+                       class="w-64 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow shadow-sm">
+
+                <!-- Dropdown Results -->
+                <div x-show="customerResults.length > 0"
+                     @click.outside="customerResults = []"
+                     class="absolute z-50 w-[400px] right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto"
+                     style="display: none;">
+                    <template x-for="c in customerResults" :key="c.id">
+                        <div @click="selectCustomer(c); customerResults = []"
+                             class="p-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 group transition-colors">
+                            <div class="font-bold text-gray-800" x-text="c.firstname + ' ' + c.lastname"></div>
+                            <div class="text-xs text-gray-500 group-hover:text-blue-600" x-text="c.email"></div>
+                            <div class="text-xs text-gray-400" x-text="c.telephone"></div>
+                            <div x-show="c.company" class="mt-1 inline-block bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase" x-text="c.company"></div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- New/Edit Button -->
+            <button @click="isNewCustomer ? resetCustomer() : startNewCustomer()"
+                    class="px-3 py-1.5 rounded-lg font-bold text-xs uppercase tracking-wider transition-colors border"
+                    :class="isNewCustomer ? 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200' : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'">
+                <span x-text="isNewCustomer ? 'Cancel' : 'New Client'"></span>
+            </button>
+        </div>
+    </div>
+
+    <!-- FORM BODY -->
+    <div class="flex-1 overflow-y-auto pr-2 space-y-4">
+
+        <!-- CUSTOMER TYPE TABS (B2C / B2B) -->
+        <div class="flex bg-gray-100 p-1 rounded-lg">
+            <button @click="isCompany = false"
+                    class="flex-1 py-1.5 text-sm font-bold rounded-md transition-all text-center"
+                    :class="!isCompany ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+                👤 Person
+            </button>
+            <button @click="isCompany = true"
+                    class="flex-1 py-1.5 text-sm font-bold rounded-md transition-all text-center"
+                    :class="isCompany ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+                🏢 Company
+            </button>
+        </div>
+
+        <!-- PERSONAL DATA -->
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">First Name *</label>
+                <input type="text" x-model="customer.firstname" class="w-full border border-gray-300 rounded p-2 text-sm font-semibold focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Last Name *</label>
+                <input type="text" x-model="customer.lastname" class="w-full border border-gray-300 rounded p-2 text-sm font-semibold focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Email *</label>
+            <input type="email" x-model="customer.email" class="w-full border border-gray-300 rounded p-2 text-sm focus:border-blue-500">
+        </div>
+
+        <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Phone</label>
+            <input type="text" x-model="customer.telephone" class="w-full border border-gray-300 rounded p-2 text-sm focus:border-blue-500">
+        </div>
+
+        <!-- COMPANY DATA (Conditional) -->
+        <div x-show="isCompany" x-transition class="bg-blue-50 p-3 rounded-lg border border-blue-100 space-y-3">
+            <div>
+                <label class="block text-xs font-bold text-blue-800 uppercase mb-1">Company Name</label>
+                <input type="text" x-model="company.name" class="w-full border border-blue-200 rounded p-2 text-sm focus:border-blue-500">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-bold text-blue-800 uppercase mb-1">UIC / Bulstat</label>
+                    <input type="text" x-model="company.uic" @blur="validateBulstat()" class="w-full border border-blue-200 rounded p-2 text-sm focus:border-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-blue-800 uppercase mb-1">VAT Number</label>
+                    <input type="text" x-model="company.vat" class="w-full border border-blue-200 rounded p-2 text-sm focus:border-blue-500" placeholder="BG...">
+                </div>
+            </div>
+        </div>
+
+        <hr class="border-gray-200">
+
+        <!-- DELIVERY SECTION -->
+        <!-- D. DELIVERY METHOD -->
+        <div class="p-6 border-t border-gray-200 bg-gray-50">
+            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Delivery</h3>
+
+            <div class="mb-4">
+                <select x-model="selectedShippingMethod"
+                        @change="onShippingChange()"
+                        class="w-full border-2 border-gray-300 rounded-lg p-3 text-sm font-bold text-gray-900 bg-white">
+                    <template x-for="method in availableShippingMethods" :key="method.code">
+                        <option :value="method.code" x-text="method.title"></option>
+                    </template>
+                </select>
+            </div>
+
+            <!-- 1. ECONT INTEGRATION (ANOWAVE) -->
+            <!-- Показва се само ако методът е econt_econt -->
+            <div x-show="selectedShippingMethod === 'econt_econt'"
+                 x-transition
+                 class="bg-white p-4 rounded border border-blue-200 shadow-sm mb-4">
+
+                <div class="flex items-center gap-2 mb-3 text-blue-700">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                    <span class="font-bold">Econt Configuration</span>
+                </div>
+
+                <!-- ТУК ИЗСИПВАМЕ БУТОНА НА ANOWAVE -->
+                <div class="anowave-container flex justify-center" x-html="urls.econtButtonHtml"></div>
+
+                <p class="text-xs text-center text-gray-500 mt-2">
+                    Click the button above to select Office or Courier details via Econt Module.
+                </p>
+            </div>
+
+            <!-- 2. STANDARD ADDRESS FIELDS (Ако не е Econt и не е Pickup) -->
+            <div x-show="selectedShippingMethod !== 'econt_econt' && !selectedShippingMethod.toLowerCase().includes('pickup') && !selectedShippingMethod.toLowerCase().includes('store')"
+                 x-transition>
+                <!-- ... (Стандартните полета за Град/Улица, които вече имаш) ... -->
+                <div class="grid grid-cols-2 gap-4 mb-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">City *</label>
+                        <input type="text" x-model="address.city" class="w-full border border-gray-300 rounded p-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">Postcode</label>
+                        <input type="text" x-model="address.postcode" class="w-full border border-gray-300 rounded p-2 text-sm">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="block text-xs font-bold text-gray-700 mb-1">Street Address *</label>
+                    <textarea x-model="address.street" rows="2" class="w-full border border-gray-300 rounded p-2 text-sm"></textarea>
+                </div>
+            </div>
+
+            <!-- 3. PICKUP MESSAGE -->
+            <div x-show="selectedShippingMethod.toLowerCase().includes('pickup') || selectedShippingMethod.toLowerCase().includes('store')"
+                 class="text-center p-4 bg-green-50 text-green-700 rounded border border-green-200">
+                <span class="font-bold text-sm">✅ Client will collect from store</span>
+            </div>
+
+        </div>
+
+    </div>
+</div>
