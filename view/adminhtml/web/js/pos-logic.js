@@ -3,19 +3,15 @@ function adminOrder(config) {
         urls: config,
         currentStoreId: null,
 
-        // --- DATA STATE ---
+        // Data State
         searchQuery: '', searchResults: [], cart: [], loading: false, placingOrder: false, grandTotal: 0, generatedLink: null,
-
-        // --- UI STATE ---
+        // UI State
         productModalOpen: false, selectedProduct: null, customerModalOpen: false, customerSearchQuery: '', customerResults: [],
-
         // Modal State
         confirmModal: { open: false, title: '', message: '', pendingId: null },
         pendingStoreId: null,
-
-        // --- CUSTOMER & ORDER LOGIC ---
+        // Customer Logic
         isNewCustomer: false, isEditMode: false, isCompany: false, bulstatValid: null,
-
         // Shipping
         selectedShippingMethod: '', availableShippingMethods: [], backupAddress: null,
 
@@ -24,31 +20,28 @@ function adminOrder(config) {
         company: { name: '', uic: '', vat: '' },
         address: { street: '', city: '', postcode: '' },
 
+        // INIT
         initPOS() {
             console.log("🚀 POS Initializing...");
-
             let targetId = parseInt(this.urls.defaultStoreId);
 
-            // 1. Проверка дали магазинът е заключен (Restricted Admin)
-            if (this.urls.isStoreLocked) {
-                targetId = parseInt(this.urls.defaultStoreId);
-            }
-            else {
-                // 2. Проверка за запазен избор в браузъра
+            if (!this.urls.isStoreLocked) {
                 let saved = localStorage.getItem('ferrous_pos_store_id');
-
-                // Проверяваме дали запазеното ID съществува в списъка с магазини
-                // (Ползваме loose equality '==' в find, за да хванем и "3", и 3)
                 if (saved && this.urls.stores.find(s => s.id == saved)) {
                     targetId = parseInt(saved);
                 }
             }
-
-            // 3. Прилагане на избора
             this.currentStoreId = targetId;
-            console.log("✅ Active Store ID set to:", this.currentStoreId);
+            console.log("✅ Active Store:", this.currentStoreId);
 
-            // 4. Зареждане на методите за доставка за този магазин
+            // Econt Hack: Залъгваме модула, че сме в стандартен order create
+            if (!window.order) {
+                window.order = {
+                    setShippingMethod: function(code) { console.log('Econt Method Set:', code); },
+                    loadShippingRates: function() { console.log('Econt Load Rates'); }
+                };
+            }
+
             this.updateShippingMethods();
         },
 
@@ -57,25 +50,21 @@ function adminOrder(config) {
             return store ? (store.website + ' - ' + store.name) : 'Select Store';
         },
 
-        // --- STORE SWITCHER ---
+        // STORE SWITCHER
         requestStoreSwitch(newStoreId) {
-            // Check if clean
             if (this.cart.length === 0 && !this.customer.id && !this.isNewCustomer) {
                 this.currentStoreId = newStoreId;
                 this.switchStoreInternal();
                 return;
             }
-            // Open Modal
             this.pendingStoreId = newStoreId;
             this.confirmModal.title = 'Change POS Location?';
-            this.confirmModal.message = '⚠️ Switching the POS Store will CLEAR all current customer data, cart items, and settings.\n\nAre you sure?';
+            this.confirmModal.message = '⚠️ Switching Store will CLEAR all data. Proceed?';
             this.confirmModal.open = true;
         },
 
-        // --- ТАЗИ ФУНКЦИЯ ЛИПСВАШЕ ИЛИ БЕШЕ СЧУПЕНА ---
         closeConfirm(confirmed) {
             this.confirmModal.open = false;
-
             if (confirmed) {
                 this.currentStoreId = this.pendingStoreId;
                 this.switchStoreInternal();
@@ -87,34 +76,24 @@ function adminOrder(config) {
         switchStoreInternal() {
             localStorage.setItem('ferrous_pos_store_id', this.currentStoreId);
             this.loading = true;
-            this.cart = []; this.grandTotal = 0;
-            this.searchResults = []; this.searchQuery = '';
-            this.generatedLink = null;
-            this.customerResults = [];
+            this.cart = []; this.grandTotal = 0; this.searchResults = []; this.searchQuery = '';
             this.resetCustomer();
-
-            setTimeout(() => {
-                this.updateShippingMethods();
-                this.loading = false;
-            }, 100);
+            setTimeout(() => { this.updateShippingMethods(); this.loading = false; }, 100);
         },
 
-        // --- SHIPPING HELPER ---
+        // SHIPPING
         updateShippingMethods() {
             let sid = this.currentStoreId;
             let methods = this.urls.allShippingMethods[sid] || this.urls.allShippingMethods[String(sid)] || [];
             this.availableShippingMethods = [...methods];
-            if (this.availableShippingMethods.length > 0) {
-                this.selectedShippingMethod = this.availableShippingMethods[0].code;
-            } else {
-                this.selectedShippingMethod = '';
-            }
+            this.selectedShippingMethod = (this.availableShippingMethods.length > 0) ? this.availableShippingMethods[0].code : '';
         },
 
         onShippingChange() {
             if (!this.selectedShippingMethod) return;
             let method = this.selectedShippingMethod.toLowerCase();
-            let isPickup = method.includes('pickup') || method.includes('store') || method.includes('clickandcollect');
+            let isPickup = method.includes('pickup') || method.includes('store');
+
             if (!isPickup) {
                 if ((!this.address.city || !this.address.street) && this.backupAddress) {
                     this.address = { ...this.backupAddress };
@@ -122,19 +101,20 @@ function adminOrder(config) {
             }
         },
 
-        // --- GETTERS ---
+        // GETTERS
         get isValidOrder() {
             if (this.cart.length === 0) return false;
             if (!this.customer.email || !this.customer.firstname) return false;
             if (this.isCompany && (!this.company.name || !this.company.uic)) return false;
             if (!this.selectedShippingMethod) return false;
+
             let method = this.selectedShippingMethod.toLowerCase();
-            let isPickup = method.includes('pickup') || method.includes('store') || method.includes('clickandcollect');
+            let isPickup = method.includes('pickup') || method.includes('store');
             if (!isPickup && !this.address.city) return false;
             return true;
         },
 
-        // --- PRODUCTS ---
+        // API CALLS
         searchProducts() {
             if (this.searchQuery.length < 2) return;
             this.loading = true;
@@ -143,6 +123,15 @@ function adminOrder(config) {
                 .then(r => r.json()).then(d => { this.searchResults = Array.isArray(d) ? d : []; this.loading = false; })
                 .catch(() => this.loading = false);
         },
+        searchCustomers() {
+            if (this.customerSearchQuery.length < 2) return;
+            let url = this.urls.customerSearchUrl + '?isAjax=1&form_key=' + this.urls.formKey + '&q=' + encodeURIComponent(this.customerSearchQuery) + '&store_id=' + this.currentStoreId;
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(r => r.json()).then(d => { this.customerResults = Array.isArray(d) ? d : []; })
+                .catch(e => console.error(e));
+        },
+
+        // CART ACTIONS
         openProductModal(product) { this.selectedProduct = product; this.productModalOpen = true; },
         addToCart(product) {
             let ex = this.cart.find(i => i.sku === product.sku);
@@ -153,43 +142,27 @@ function adminOrder(config) {
         calculateTotal() { this.grandTotal = this.cart.reduce((s, i) => s + (i.price * i.qty), 0); },
         formatPrice(p) { return parseFloat(p).toFixed(2) + ' BGN'; },
 
-        // --- CUSTOMERS ---
-        openCustomerModal() {
-            this.customerModalOpen = true; this.customerSearchQuery = ''; this.customerResults = [];
-            setTimeout(() => { let input = document.querySelector('[x-ref="customerSearchInput"]'); if(input) input.focus(); }, 100);
-        },
-        searchCustomers() {
-            if (this.customerSearchQuery.length < 2) return;
-            let url = this.urls.customerSearchUrl + '?isAjax=1&form_key=' + this.urls.formKey + '&q=' + encodeURIComponent(this.customerSearchQuery) + '&store_id=' + this.currentStoreId;
-            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-                .then(r => r.json()).then(d => { this.customerResults = Array.isArray(d) ? d : []; })
-                .catch(e => console.error(e));
-        },
+        // CUSTOMER ACTIONS
+        openCustomerModal() { this.customerModalOpen = true; this.customerSearchQuery = ''; },
         selectCustomer(c) {
             this.customer = { id: c.id, firstname: c.firstname, lastname: c.lastname, email: c.email, telephone: c.telephone || '' };
-            if(c.city) { this.address = { city: c.city || '', street: c.street || '', postcode: c.postcode || '' }; }
-            else { this.address = { street: '', city: '', postcode: '' }; }
+            this.address = c.city ? { city: c.city, street: c.street || '', postcode: c.postcode || '' } : { street: '', city: '', postcode: '' };
             this.backupAddress = { ...this.address };
+
             if(c.company) { this.isCompany = true; this.company = { name: c.company, uic: c.vat_id || '', vat: '' }; }
             else { this.isCompany = false; this.company = { name: '', uic: '', vat: '' }; }
-            this.isNewCustomer = false; this.isEditMode = false; this.customerModalOpen = false;
+            this.customerModalOpen = false; this.customerResults = [];
         },
         startNewCustomer() { this.isNewCustomer = true; this.isEditMode = false; this.resetCustomerData(); },
-        editSelectedCustomer() { this.isNewCustomer = true; this.isEditMode = true; },
-        enableEditMode(status) {
-            this.isEditMode = status;
-            if(status === false) { this.isNewCustomer = false; this.resetCustomer(); }
-        },
         resetCustomer() { this.resetCustomerData(); this.customer.id = null; this.isNewCustomer = false; this.isEditMode = false; },
         resetCustomerData() {
             this.customer = { id: null, firstname: '', lastname: '', email: '', telephone: '' };
             this.company = { name: '', uic: '', vat: '' };
-            this.isCompany = false; this.bulstatValid = null; this.address = { street: '', city: '', postcode: '' };
-            this.backupAddress = null;
+            this.isCompany = false; this.address = { street: '', city: '', postcode: '' }; this.backupAddress = null;
         },
-        validateBulstat() { let uic = this.company.uic; if(!uic) { this.bulstatValid = null; return; } if (!/^\d{9}$/.test(uic) && !/^\d{13}$/.test(uic)) { this.bulstatValid = false; return; } this.bulstatValid = true; if(this.bulstatValid && !this.company.vat) { this.company.vat = 'BG' + uic; } },
+        validateBulstat() { let uic = this.company.uic; if(/^\d{9,13}$/.test(uic)) { this.bulstatValid = true; if(!this.company.vat) this.company.vat = 'BG' + uic; } else this.bulstatValid = false; },
 
-        // --- ACTIONS ---
+        // ORDER ACTIONS
         placeOrder() {
             if (!confirm('Place Order?')) return;
             this.placingOrder = true;
